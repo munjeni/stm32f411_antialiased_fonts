@@ -1,0 +1,1 @@
+stm32f411 antialiased font support, this php script uses TTF font to generate C language antialiased fonts with all structures and functions which you can use to display nice antialiased fonts on your display. Generated fonts doesn't depend on any external lib! Functions for displaying font uses double buffering and DMA, very smooth on display
