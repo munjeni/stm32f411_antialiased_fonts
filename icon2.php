@@ -24,109 +24,121 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_FILES['font_image'])) {
-    $uploadFile = $_FILES['font_image']['tmp_name'];
-    $fontname = pathinfo($_FILES['font_image']['name'], PATHINFO_FILENAME);
-    $fontname = str_replace(['-', ' '], '_', $fontname);
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_FILES['font_image']))
+{
+	$uploadFile = $_FILES['font_image']['tmp_name'];
+	$fontname = pathinfo($_FILES['font_image']['name'], PATHINFO_FILENAME);
+	$fontname = str_replace(['-', ' '], '_', $fontname);
 
-    // 1. UCITAVANJE SLIKE
-    $imageInfo = getimagesize($uploadFile);
-    if ($imageInfo === false) {
-        die("Fajl nije slika!");
-    }
+	// 1. UCITAVANJE SLIKE
+	$imageInfo = getimagesize($uploadFile);
 
-    switch ($imageInfo[2]) {
-        case IMAGETYPE_GIF: $tempIm = imagecreatefromgif($uploadFile); break;
-        case IMAGETYPE_JPEG: $tempIm = imagecreatefromjpeg($uploadFile); break;
-        case IMAGETYPE_PNG: $tempIm = imagecreatefrompng($uploadFile); break;
-	case IMAGETYPE_BMP: $tempIm = imagecreatefrombmp($uploadFile); break;
-        default: die("Format nije podrzan!");
-    }
+	if ($imageInfo === false)
+		die("Fajl nije slika!");
 
-    $tempW = imagesx($tempIm);
-    $tempH = imagesy($tempIm);
-
-    // 2. SKENIRANJE: Trazimo "meso" (sadrzaj)
-    $minY = $tempH;
-    $maxY = 0;
-    //for ($y = 0; $y < $tempH; $y++) {
-    //    for ($x = 0; $x < $tempW; $x++) {
-    //        $rgb = imagecolorat($tempIm, $x, $y);
-    //        $r = ($rgb >> 16) & 0xFF;
-    //        if ($r < 240) { // Ako nije belo
-    //            if ($y < $minY) $minY = $y;
-    //            if ($y > $maxY) $maxY = $y;
-    //        }
-    //    }
-    //}
-    
-    $targetH = ($maxY >= $minY) ? ($maxY - $minY) + 1 : $tempH;
-    $offY = ($maxY >= $minY) ? $minY : 0;
-
-    // 3. PRIPREMA ZA GENERISANJE
-    $finalW = $tempW;
-    $loIm = imagecreatetruecolor($finalW, $targetH);
-    imagecopy($loIm, $tempIm, 0, 0, 0, $offY, $finalW, $targetH);
-
-    // Prikupi sve piksele u niz (invertovano)
-    $raw_pixels = [];
-    for ($y = 0; $y < $targetH; $y++) {
-        for ($x = 0; $x < $finalW; $x++) {
-            $val = (imagecolorat($loIm, $x, $y) >> 16) & 0xFF;
-            $raw_pixels[] = 255 - $val;
-        }
-    }
-
-    // --- RLE KOMPRESIJA (Tvoj format: 0x80|count za ponavljanje, 0x01 za unikate) ---
-    $rle_output = [];
-    $i = 0;
-    $total = count($raw_pixels);
-
-    while ($i < $total) {
-        $run = 1;
-        // Gledamo koliko se bajtova ponavlja (max 255)
-        while ($i + $run < $total && $raw_pixels[$i] == $raw_pixels[$i + $run] && $run < 0xff) {
-            $run++;
-        }
-
-	if ($run > 1) {
-		$rle_output[] = $run;       // Cist broj, npr. 10 (0x0A)
-		$rle_output[] = $raw_pixels[$i];
-		$i += $run;
-	} else {
-		$rle_output[] = 1;          // Broj 1 za unikate
-		$rle_output[] = $raw_pixels[$i];
-		$i++;
+	switch ($imageInfo[2])
+	{
+		case IMAGETYPE_GIF: $tempIm = imagecreatefromgif($uploadFile); break;
+		case IMAGETYPE_JPEG: $tempIm = imagecreatefromjpeg($uploadFile); break;
+		case IMAGETYPE_PNG: $tempIm = imagecreatefrompng($uploadFile); break;
+		case IMAGETYPE_BMP: $tempIm = imagecreatefrombmp($uploadFile); break;
+		default: die("Format nije podrzan!");
 	}
-    }
 
-    $metrics_c = "extern SPI_HandleTypeDef ST7789_SPI_PORT;\n\n";
-    $metrics_c .= "#define " . strtoupper($fontname) . "_SPRITE_W " . $finalW . " // ukupna sirina\n";
-    $metrics_c .= "#define " . strtoupper($fontname) . "_H " . $targetH . " // visina slike\n";
-    $metrics_c .= "#define " . strtoupper($fontname) . "_MAX_W " . ($finalW + 1) . "\n\n";
-    $metrics_c .= "typedef struct {\n	uint16_t x;\n	uint8_t w;\n} CharMap;\n\n";
-    $metrics_c .= "const CharMap " . $fontname . "_metrics[] = {\n";
-    $metrics_c .= "	{ 0, $finalW }\n};\n\n";
+	$tempW = imagesx($tempIm);
+	$tempH = imagesy($tempIm);
 
-    $pixels_c = "const uint8_t " . $fontname . "_pixels[] = {\n\t";
-    $total = count($rle_output);
+	// 2. SKENIRANJE: Trazimo "meso" (sadrzaj)
+	$minY = $tempH;
+	$maxY = 0;
+	//for ($y = 0; $y < $tempH; $y++) {
+	//	for ($x = 0; $x < $tempW; $x++) {
+	//		$rgb = imagecolorat($tempIm, $x, $y);
+	//		$r = ($rgb >> 16) & 0xFF;
+	//		if ($r < 240) { // Ako nije belo
+	//			if ($y < $minY) $minY = $y;
+	//			if ($y > $maxY) $maxY = $y;
+	//		}
+	//	}
+	//}
+	
+	$targetH = ($maxY >= $minY) ? ($maxY - $minY) + 1 : $tempH;
+	$offY = ($maxY >= $minY) ? $minY : 0;
 
-    foreach ($rle_output as $idx => $byte) {
-        $pixels_c .= sprintf("0x%02X", $byte);
-    
-        // Dodaj zarez i razmak ako nije poslednji element
-        if ($idx < $total - 1) {
-            $pixels_c .= ", ";
-        
-            // Novi red samo ako je deljivo sa 16 i NIJE kraj niza
-            if (($idx + 1) % 16 == 0) {
-                $pixels_c .= "\n\t";
-            }
-        }
-    }
-    $pixels_c .= "\n};\n";
+	// 3. PRIPREMA ZA GENERISANJE
+	$finalW = $tempW;
+	$loIm = imagecreatetruecolor($finalW, $targetH);
+	imagecopy($loIm, $tempIm, 0, 0, 0, $offY, $finalW, $targetH);
 
-    $functions_c = '
+	// Prikupi sve piksele u niz (invertovano)
+	$raw_pixels = [];
+
+	for ($y = 0; $y < $targetH; $y++)
+	{
+		for ($x = 0; $x < $finalW; $x++)
+		{
+			$val = (imagecolorat($loIm, $x, $y) >> 16) & 0xFF;
+			$raw_pixels[] = 255 - $val;
+		}
+	}
+
+	// --- RLE KOMPRESIJA (Tvoj format: 0x80|count za ponavljanje, 0x01 za unikate) ---
+	$rle_output = [];
+	$i = 0;
+	$total = count($raw_pixels);
+
+	while ($i < $total)
+	{
+		$run = 1;
+		// Gledamo koliko se bajtova ponavlja (max 255)
+		while ($i + $run < $total && $raw_pixels[$i] == $raw_pixels[$i + $run] && $run < 0xff)
+		{
+			$run++;
+		}
+
+		if ($run > 1)
+		{
+			$rle_output[] = $run;	   // Cist broj, npr. 10 (0x0A)
+			$rle_output[] = $raw_pixels[$i];
+			$i += $run;
+		}
+		else
+		{
+			$rle_output[] = 1;		  // Broj 1 za unikate
+			$rle_output[] = $raw_pixels[$i];
+			$i++;
+		}
+	}
+
+	$metrics_c = "extern SPI_HandleTypeDef ST7789_SPI_PORT;\n\n";
+	$metrics_c .= "#define " . strtoupper($fontname) . "_SPRITE_W " . $finalW . " // ukupna sirina\n";
+	$metrics_c .= "#define " . strtoupper($fontname) . "_H " . $targetH . " // visina slike\n";
+	$metrics_c .= "#define " . strtoupper($fontname) . "_MAX_W " . ($finalW + 1) . "\n\n";
+	$metrics_c .= "typedef struct {\n	uint16_t x;\n	uint8_t w;\n} CharMap;\n\n";
+	$metrics_c .= "const CharMap " . $fontname . "_metrics[] = {\n";
+	$metrics_c .= "	{ 0, $finalW }\n};\n\n";
+
+	$pixels_c = "const uint8_t " . $fontname . "_pixels[] = {\n\t";
+	$total = count($rle_output);
+
+	foreach ($rle_output as $idx => $byte)
+	{
+		$pixels_c .= sprintf("0x%02X", $byte);
+	
+		// Dodaj zarez i razmak ako nije poslednji element
+		if ($idx < $total - 1)
+		{
+			$pixels_c .= ", ";
+		
+			// Novi red samo ako je deljivo sa 16 i NIJE kraj niza
+			if (($idx + 1) % 16 == 0)
+				$pixels_c .= "\n\t";
+		}
+	}
+
+	$pixels_c .= "\n};\n";
+
+	$functions_c = '
 /* --- ALPHA BLENDING --- */
 static inline uint16_t Blend565(uint16_t fore, uint16_t back, uint8_t alpha)
 {
@@ -171,7 +183,7 @@ void ST7789_PrintGraphic(uint16_t x, uint16_t y, const uint8_t *graphic, uint16_
 	while (buf_ptr < total_pixels)
 	{
 		uint8_t count = graphic[rle_ptr++]; // Cita cist broj (npr. 10)
-		uint8_t a     = graphic[rle_ptr++]; // Cita vrednost alfe
+		uint8_t a	 = graphic[rle_ptr++]; // Cita vrednost alfe
 
 		for (uint16_t i = 0; i < count; i++)
 		{
@@ -204,45 +216,45 @@ void ST7789_PrintGraphic(uint16_t x, uint16_t y, const uint8_t *graphic, uint16_
 }
 ';
 
-    file_put_contents('font_data.h', $metrics_c . $pixels_c . $functions_c);
+	file_put_contents('font_data.h', $metrics_c . $pixels_c . $functions_c);
 
-    // Priprema preview-a
-    ob_start();
-    imagepng($loIm);
-    $base64 = base64_encode(ob_get_clean());
-    imagedestroy($tempIm);
-    imagedestroy($loIm);
+	// Priprema preview-a
+	ob_start();
+	imagepng($loIm);
+	$base64 = base64_encode(ob_get_clean());
+	imagedestroy($tempIm);
+	imagedestroy($loIm);
 }
 ?>
 <!DOCTYPE html>
-<html lang="sr">
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>RLE Generator</title>
-    <style>
-        body { background: #cccccc; color: #000000; font-family: sans-serif; padding: 40px; }
-        .box { background: #ffffff; padding: 20px; border-radius: 8px; border: 1px solid #444; }
-        .preview-container { background: #cccccc; display: inline-block; line-height: 0; margin-top: 10px; padding: 5px; border: 1px solid #000; }
-        input, button { padding: 10px; margin-top: 10px; cursor: pointer; }
-    </style>
+	<meta charset="UTF-8">
+	<title>Picture to STM32 RLE Compressed C Array file Generator</title>
+	<style>
+		body { background: #cccccc; color: #000000; font-family: sans-serif; padding: 40px; }
+		.box { background: #ffffff; padding: 20px; border-radius: 8px; border: 1px solid #444; }
+		.preview-container { background: #cccccc; display: inline-block; line-height: 0; margin-top: 10px; padding: 5px; border: 1px solid #000; }
+		input, button { padding: 10px; margin-top: 10px; cursor: pointer; }
+	</style>
 </head>
 <body>
-    <div class="box">
-        <h3>Učitaj sliku za RLE generisanje</h3>
-        <form method="POST" enctype="multipart/form-data">
-            <input type="file" name="font_image" required><br>
-            <button type="submit">Generiši font_data.h</button>
-        </form>
-    </div>
+	<div class="box">
+		<h3>Open picture for Picture to C RLE array</h3>
+		<form method="POST" enctype="multipart/form-data">
+			<input type="file" name="font_image" required><br>
+			<button type="submit">Generate font_data.h</button>
+		</form>
+	</div>
 
-    <?php if (isset($base64)): ?>
-    <div style="margin-top: 30px;">
-        <h3>Rezultat (Visina: <?php echo $targetH; ?>px):</h3>
-        <div class="preview-container">
-            <img src="data:image/png;base64,<?php echo $base64; ?>" style="display:block;" />
-        </div>
-        <p>Fajl <b>font_data.h</b> je uspešno generisan sa RLE kompresijom.</p>
-    </div>
-    <?php endif; ?>
+	<?php if (isset($base64)): ?>
+	<div style="margin-top: 30px;">
+		<h3>Rezultat (Visina: <?php echo $targetH; ?>px):</h3>
+		<div class="preview-container">
+			<img src="data:image/png;base64,<?php echo $base64; ?>" style="display:block;" />
+		</div>
+		<p>Fajl <b>font_data.h</b> is sucesfully generated and RLE compressied.</p>
+	</div>
+	<?php endif; ?>
 </body>
 </html>
