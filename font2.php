@@ -37,7 +37,8 @@ $lastChar = 126;
 
 // 1. Renderujemo ceo set karaktera na privremeno platno da nadjemo "meso" (sadrzaj)
 $text = "";
-for ($i = $firstChar; $i <= $lastChar; $i++) $text .= chr($i);
+for ($i = $firstChar; $i <= $lastChar; $i++)
+	$text .= chr($i);
 
 $tempH = 100;
 $tempW = 3000;
@@ -50,16 +51,26 @@ imagefttext($tempIm, $renderSize, 0, 10, 70, $black, $fontPath, $text); // Tekst
 // 2. SKENIRANJE: Trazimo crne piksele (gde je vrednost manja od 255)
 $minY = $tempH;
 $maxY = 0;
-for ($y = 0; $y < $tempH; $y++) {
-    for ($x = 0; $x < $tempW; $x++) {
-        $rgb = imagecolorat($tempIm, $x, $y);
-        $r = ($rgb >> 16) & 0xFF;
-        if ($r < 240) { // Ako nije cisto belo, to je "meso" slova
-            if ($y < $minY) $minY = $y;
-            if ($y > $maxY) $maxY = $y;
-        }
-    }
+
+for ($y = 0; $y < $tempH; $y++)
+{
+	for ($x = 0; $x < $tempW; $x++)
+	{
+		$rgb = imagecolorat($tempIm, $x, $y);
+		$r = ($rgb >> 16) & 0xFF;
+
+		// Ako nije cisto belo, to je "meso" slova
+		if ($r < 240)
+		{
+			if ($y < $minY)
+				$minY = $y;
+
+			if ($y > $maxY)
+				$maxY = $y;
+		}
+	}
 }
+
 $contentH = ($maxY - $minY) + 1; // Stvarna visina slova bez praznina
 
 // 3. GENERISANJE FINALNIH KARAKTERA (Force-fit na 18px)
@@ -77,65 +88,111 @@ typedef struct {
 	uint8_t w;  // sirina slova
 } CharMap;' . "\n\n";
 
-$metrics_c .= "const CharMap " . $fontname . "_metrics[] = {\n";
-$pixels_c = "const uint8_t " . $fontname . "_pixels[] = {\n";
+$metrics_c .= "static const CharMap " . $fontname . "_metrics[] = {\n";
+$pixels_c = "static const uint8_t " . $fontname . "_pixels[] = {\n";
 $currentOffset = 0;
 $glyphs = [];
 
 // Prvo pripremamo sve glyphove u niz
-for ($i = $firstChar; $i <= $lastChar; $i++) {
-    $char = chr($i);
-    $box = imageftbbox($renderSize, 0, $fontPath, $char);
-    $w = abs($box[2] - $box[0]);
-    if ($w <= 0) $w = 15; // Space
+for ($i = $firstChar; $i <= $lastChar; $i++)
+{
+	$char = chr($i);
+	$box = imageftbbox($renderSize, 0, $fontPath, $char);
+	$w = abs($box[2] - $box[0]);
 
-    $charIm = imagecreatetruecolor($w + 10, $tempH);
-    imagefill($charIm, 0, 0, $white);
-    imagefttext($charIm, $renderSize, 0, 0, 70, $black, $fontPath, $char);
+	if ($w <= 0)
+		$w = 15; // Space
 
-    $finalW = (int)round(($w / $contentH) * $targetH);
-    if ($finalW <= 0) $finalW = 1;
+	$charIm = imagecreatetruecolor($w + 10, $tempH);
+	imagefill($charIm, 0, 0, $white);
+	imagefttext($charIm, $renderSize, 0, 0, 70, $black, $fontPath, $char);
 
-    $loIm = imagecreatetruecolor($finalW, $targetH);
-    imagecopyresampled($loIm, $charIm, 0, 0, 0, $minY, $finalW, $targetH, $w, $contentH);
+	$finalW = (int)round(($w / $contentH) * $targetH);
 
-    $metrics_c .= "	{ $currentOffset, $finalW }, // " . chr($i) . "\n";
-    if ($finalW > $makssirina2) $makssirina2 = $finalW;
+	if ($finalW <= 0)
+		$finalW = 1;
+
+	$loIm = imagecreatetruecolor($finalW, $targetH);
+	imagefill($loIm, 0, 0, $white);
+	imagecopyresampled($loIm, $charIm, 0, 0, 0, $minY, $finalW, $targetH, $w, $contentH);
+
+	if ($i == $lastChar)
+		$metrics_c .= "\t{ $currentOffset, $finalW }// ";
+	else
+		$metrics_c .= "\t{ $currentOffset, $finalW }, // ";
+
+	if ($i == 32)
+		$metrics_c .= "Space";
+	else if ($i == 0x5c)
+		$metrics_c .= "Backslash";
+	else
+		$metrics_c .= chr($i);
+
+	$metrics_c .= "\n";
+
+	if ($finalW > $makssirina2)
+		$makssirina2 = $finalW;
     
-    $glyphs[] = ['im' => $loIm, 'w' => $finalW];
-    $currentOffset += $finalW; // m.x je sada X pozicija
+	$glyphs[] = ['im' => $loIm, 'w' => $finalW];
+	//$glyphs[] = ['im' => $loIm, 'w' => $finalW, 'char' => $char, 'hex' => sprintf("%02X", $i), 'h'=> $targetH];
+	$currentOffset += $finalW; // m.x je sada X pozicija
 }
+
 $totalpiksels = $currentOffset; // SPRITE_W je suma sirina
+$total_piksel_bytes = 0;
+
+// Prikupi sve piksele u niz (invertovano)
+//$raw_pixels = [];
 
 // Generisanje piksela: Red po red za sva slova (Atlas format)
-for ($y = 0; $y < $targetH; $y++) {
-    $pixels_c .= "	";
-    foreach ($glyphs as $g) {
-        for ($x = 0; $x < $g['w']; $x++) {
-            $val = (imagecolorat($g['im'], $x, $y) >> 16) & 0xFF;
-            $pixels_c .= sprintf("0x%02X, ", 255 - $val);
-        }
-    }
-    $pixels_c .= "// Red $y\n";
+for ($y = 0; $y < $targetH; $y++)
+{
+	$pixels_c .= "	";
+
+	foreach ($glyphs as $g)
+	{
+		for ($x = 0; $x < $g['w']; $x++)
+		{
+			$val = (imagecolorat($g['im'], $x, $y) >> 16) & 0xFF;
+			$pixel = sprintf("0x%02X", 255 - $val);
+			$pixels_c .= $pixel;
+
+			//$raw_pixels[$total_piksel_bytes] = $pixel;
+
+			if ($total_piksel_bytes < ($totalpiksels * $targetH) - 1)
+				$pixels_c .= ", ";
+
+			$total_piksel_bytes += 1;
+		}
+	}
+
+	//$pixels_c .= "// Red $y\n";
+	$pixels_c .= "\n";
 }
 
 // Generisanje piksela: Red po red za sva slova (Atlas format)
-//for ($y = 0; $y < $targetH; $y++) {
-//    $pixels_c .= "    // --- Red $y ---\n    ";
-//    foreach ($glyphs as $index => $g) {
-//        for ($x = 0; $x < $g['w']; $x++) {
-//            $val = (imagecolorat($g['im'], $x, $y) >> 16) & 0xFF;
-//            $pixels_c .= sprintf("0x%02X, ", 255 - $val);
-//        }
-//        $char = chr($index + $firstChar);
-//        $displayChar = ($char === ' ') ? "Space" : $char;
-//        $pixels_c .= " /* $displayChar */ "; // Komentar nakon svakog karaktera unutar reda
-//    }
-//    $pixels_c .= "\n\n"; // Prelazak u novi red nakon što se obrade sva slova za tu visinu
+//for ($y = 0; $y < $targetH; $y++)
+//{
+//	$pixels_c .= "    // --- Red $y ---\n    ";
+//
+//	foreach ($glyphs as $index => $g)
+//	{
+//		for ($x = 0; $x < $g['w']; $x++)
+//		{
+//			$val = (imagecolorat($g['im'], $x, $y) >> 16) & 0xFF;
+//			$pixels_c .= sprintf("0x%02X, ", 255 - $val);
+//		}
+//
+//		$char = chr($index + $firstChar);
+//		$displayChar = ($char === ' ') ? "Space" : $char;
+//		$pixels_c .= " /* $displayChar */ "; // Komentar nakon svakog karaktera unutar reda
+//	}
+//
+//	$pixels_c .= "\n\n"; // Prelazak u novi red nakon sto se obrade sva slova za tu visinu
 //}
 
 $metrics_c = str_replace('brojpiksela', $totalpiksels, $metrics_c);
-$metrics_c = str_replace('makssirina', ($makssirina2 + 1), $metrics_c);
+$metrics_c = str_replace('makssirina', $makssirina2, $metrics_c);
 
 $pixels_c .= '};
 
@@ -239,26 +296,48 @@ void ST7789_PrintAA(uint16_t x, uint16_t y, char *str, uint16_t txtCol, uint16_t
 		// 6. Pokretanje DMA prenosa (saljemo uvek fiksnu sirinu boksa)
 		HAL_SPI_Transmit_DMA(&ST7789_SPI_PORT, (uint8_t *)pBuf, MAX_CHAR_W * FONT_H * 2);
 
+		// cekaj kraj poslednjeg karaktera pre izlaska da bi sabirnica bila slobodna
+		while (HAL_DMA_GetState(ST7789_SPI_PORT.hdmatx) != HAL_DMA_STATE_READY);
+		HAL_GPIO_WritePin(ST7789_CS_PORT, ST7789_CS_PIN, GPIO_PIN_SET);
+
 		// 7. Pomeri kursor, predji na sledeci karakter i zameni bafer
-		// Pomeraj curX za m.w zadrzava originalni "kerning" fonta
-		curX += m.w; 
+		// Pomeraj curX za charW zadrzava originalni "kerning" fonta
+		curX += charW; 
 		str++;
 		active_buf = (active_buf == 0) ? 1 : 0; 
 	}
-
-    // cekaj kraj poslednjeg karaktera pre izlaska da bi sabirnica bila slobodna
-    while (HAL_DMA_GetState(ST7789_SPI_PORT.hdmatx) != HAL_DMA_STATE_READY);
 }' . "\n";
 
 // 4. DISPLAY & SAVE
 $preview = imagecreatetruecolor($totalpiksels, $targetH);
 $cx = 0;
-foreach($glyphs as $g) { imagecopy($preview, $g['im'], $cx, 0, 0, 0, $g['w'], $targetH); $cx += $g['w']; }
+
+foreach($glyphs as $g)
+{
+	imagecopy($preview, $g['im'], $cx, 0, 0, 0, $g['w'], $targetH);
+	$cx += $g['w'];
+}
 
 file_put_contents('font_data.h', $metrics_c . "};\n\n" . $pixels_c);
 
-ob_start(); imagepng($preview); $base64 = base64_encode(ob_get_clean());
-echo "<body style='background:#2222; padding:50px;'>";
-echo "<h3>Garantovano 18px (Proveri Inspect-om sliku):</h3>";
-echo "<div style='background:white; display:inline-block; line-height:0;'><img src='data:image/png;base64,$base64' style='height:18px; display:block;' /></div>";
-echo "</body>";
+ob_start();
+imagepng($preview);
+$base64 = base64_encode(ob_get_clean());
+
+echo '<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>FONT Generator</title>
+    <style>
+        body { background: #cccccc; color: #000000; font-family: sans-serif; padding: 40px; }
+        .box { background: #ffffff; padding: 20px; border-radius: 8px; border: 1px solid #444; }
+        .preview-container { background: #cccccc; display: inline-block; line-height: 0; margin-top: 10px; padding: 5px; border: 1px solid #000; }
+        input, button { padding: 10px; margin-top: 10px; cursor: pointer; }
+    </style>
+</head>
+';
+echo "<body style='background:#2222; padding:50px;'>\n";
+echo "<h3>Font 18px is generated to font_data.h! Inspect this picture of the font look:</h3>\n";
+echo "<div style='background:white; display:inline-block; line-height:0;'><img src='data:image/png;base64,$base64' style='height:18px; display:block;' /></div>\n";
+echo "</body>\n</html>\n";
